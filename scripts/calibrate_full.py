@@ -108,7 +108,8 @@ def main() -> None:
         if sum(yv) == 0:
             thresholds[cat] = 0.5
             categories[cat] = {"best_threshold": 0.5, "f1_at_best": 0.0, "ece": ece(probs, yv),
-                                "prevalence": 0.0, "note": "no positives in catval; default 0.5"}
+                                "prevalence": 0.0, "experimental": True,
+                                "note": "no positives in catval; default 0.5"}
             continue
         best = (0.5, -1.0)
         for t in [x / 100 for x in range(20, 96)]:
@@ -122,7 +123,8 @@ def main() -> None:
                 best = (t, f1)
         thresholds[cat] = best[0]
         categories[cat] = {"best_threshold": best[0], "f1_at_best": best[1], "ece": ece(probs, yv),
-                           "prevalence": sum(yv) / len(yv)}
+                           "prevalence": sum(yv) / len(yv),
+                           "experimental": best[1] < 0.3}  # weak cats are flagged experimental
         print(f"{cat:22s} thr={best[0]:.2f} f1={best[1]:.4f} prev={sum(yv)/len(yv):.3f}")
 
     result = {
@@ -134,6 +136,7 @@ def main() -> None:
         "catval_n": len(catval),
         "categories": categories,
         "cat_thresholds": thresholds,
+        "cat_experimental": [c for c, v in categories.items() if v.get("experimental")],
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

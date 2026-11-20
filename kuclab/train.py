@@ -146,6 +146,28 @@ def train(config: dict, data_dir: Path, out_dir: Path, resume: bool, init_checkp
     max_tokens = tcfg["batch_size"] * max_len
 
     train_loader = Batcher(train_ds, tcfg["batch_size"], max_tokens, shuffle=True, seed=config["seed"])
+
+    # per-category pos_weight = neg/pos over labeled train rows (capped), so rare
+    # categories (self_harm, sexual_abuse, jailbreak) are not drowned by hate
+    n_cat = 10
+    cat_pos = [0.0] * n_cat
+    cat_neg = [0.0] * n_cat
+    for r in train_ds.rows:
+        if int(r["label"]) != 1:
+            continue  # pos_weight is computed over unsafe rows only; safe rows are
+                      # handled by the full-mask zero targets in the loss itself
+        cats = r.get("cats") or []
+        for ci in range(n_cat):
+            if ci in cats:
+                cat_pos[ci] += 1
+            else:
+                cat_neg[ci] += 1
+    cap = float(tcfg.get("cat_pos_weight_cap", 10.0))
+    cat_pos_weight = torch.tensor(
+        [min(cap, cat_neg[i] / max(1.0, cat_pos[i])) for i in range(n_cat)],
+        dtype=torch.float32, device=device,
+    )
+    print("cat_pos_weight:", [round(float(x), 2) for x in cat_pos_weight])
     val_loader = Batcher(val_ds, tcfg["batch_size"] * 2, max_tokens * 2, shuffle=False, seed=config["seed"])
 
     epochs = tcfg["epochs"]
@@ -268,7 +290,10 @@ def train(config: dict, data_dir: Path, out_dir: Path, resume: bool, init_checkp
                     cats = torch.tensor([item["cats"] for item in batch], dtype=torch.float32, device=device)
                     cats_mask = torch.tensor([item["cats_mask"] for item in batch], dtype=torch.float32, device=device)
                     cat_logits = logits[:, 2:].float().clamp(-30.0, 30.0)
-                    bce = F.binary_cross_entropy_with_logits(cat_logits, cats, reduction="none") * cats_mask
+                    # pos_weight balances rare categories (self_harm, sexual_abuse, ...)
+                    # against hate which dominates the labeled rows (Censer.9 fix)
+                    bce = F.binary_cross_entropy_with_logits(
+                        cat_logits, cats, reduction="none", pos_weight=cat_pos_weight) * cats_mask
                     cat_loss = (bce.sum(-1) / cats_mask.sum(-1).clamp(min=1.0)) * weights
                     loss = loss + float(tcfg.get("cat_weight", 1.0)) * cat_loss.mean() / tcfg["grad_accum_steps"]
 

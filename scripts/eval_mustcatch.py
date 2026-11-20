@@ -42,6 +42,22 @@ def main() -> None:
     fp = sum(1 for p in hn_probs if p >= 0.5)
     misses = [(t, round(p, 3)) for t, p in zip(mc_texts, mc_probs) if p < 0.5]  # noqa
     fps = [(t, round(p, 3)) for t, p in zip(all_safe, hn_probs) if p >= 0.5]
+    # held-out set (never in training): honest generalization number
+    heldout_path = Path("data/processed/mustcatch_heldout.jsonl")
+    held = {}
+    if heldout_path.exists():
+        hrows = [json.loads(l) for l in open(heldout_path, encoding="utf-8")]
+        h_texts = [r["text"] for r in hrows]
+        h_labels = [int(r["label"]) for r in hrows]
+        h_probs = predict_proba(model, tok, h_texts, max_len, device, batch_size=64)
+        h_det = sum(1 for l, p in zip(h_labels, h_probs) if l == 1 and p >= 0.5)
+        h_fp = sum(1 for l, p in zip(h_labels, h_probs) if l == 0 and p >= 0.5)
+        held = {"n": len(hrows), "unsafe_n": sum(h_labels), "detected@0.5": h_det,
+                "benign_n": sum(1 for l in h_labels if l == 0), "false_positives@0.5": h_fp,
+                "misses": [(t, round(p, 3)) for t, l, p in zip(h_texts, h_labels, h_probs) if l == 1 and p < 0.5],
+                "fps": [(t, round(p, 3)) for t, l, p in zip(h_texts, h_labels, h_probs) if l == 0 and p >= 0.5]}
+        print(f"HELD-OUT must-catch detection @0.5: {h_det}/{sum(h_labels)}; benign FP: {h_fp}/{sum(1 for l in h_labels if l==0)}")
+        Path("reports/mustcatch_heldout.json").write_text(json.dumps(held, indent=2, ensure_ascii=False))
     print(f"must-catch detection @0.5: {det}/{len(mc_probs)} ({det/len(mc_probs):.1%})")
     for t, p in misses:
         print(f"  MISS ({p}): {t}")
@@ -53,6 +69,7 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({
         "checkpoint": args.checkpoint,
+        "heldout": held,
         "must_catch": {"n": len(mc_probs), "detected@0.5": det, "rate": det / len(mc_probs),
                        "misses": misses, "items": [{"text": t, "cats": c, "p": round(p, 4)}
                                                       for (t, c), p in zip(all_unsafe, mc_probs)]},

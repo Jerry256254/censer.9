@@ -5,7 +5,11 @@ import json
 import sys
 
 from .infer import SafetyModel
-from .langdetect import detect_lang
+from .langdetect import detect_lang, must_catch_hit
+
+
+
+
 
 BANNER = "Censer.9 - napis text, Enter. 'exit' pro konec."
 
@@ -75,14 +79,21 @@ class HubClassifier:
             probs = logits.sigmoid() if n_labels > 2 else logits.softmax(-1)
         p = float(probs[1])
         lang_thr = getattr(self.model.config, "lang_thresholds", None) or {}
-        thr = float(lang_thr.get(detect_lang(text), 0.5))
+        thr = float(lang_thr.get(detect_lang(text), lang_thr.get("default", 0.5)))
         label = "unsafe" if p >= thr else "safe"
         cats = []
-        if n_labels > 2 and label == "unsafe":  # categories only reported for unsafe verdicts
+        if n_labels > 2:
             id2label = self.model.config.id2label
             cat_thr = getattr(self.model.config, "cat_thresholds", None) or {}
-            cats = [id2label[i] for i in range(2, n_labels)
-                    if float(probs[i]) >= float(cat_thr.get(id2label[i], 0.5))]
+            for name in must_catch_hit(text):  # Censer.9 pattern pre-filter
+                label = "unsafe"
+                if name not in cats:
+                    cats.append(name)
+            if label == "unsafe":
+                for i in range(2, n_labels):
+                    name = id2label[i]
+                    if float(probs[i]) >= float(cat_thr.get(name, 0.5)) and name not in cats:
+                        cats.append(name)
         return label, p, cats
 
 

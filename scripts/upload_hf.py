@@ -34,13 +34,28 @@ def cat_thresholds() -> dict:
     if p.exists():
         try:
             cal = _json.loads(p.read_text())
-            for cat, v in cal.get("categories", {}).items():
-                thr = float(v.get("best_threshold", 0.5))
-                f1 = float(v.get("f1_at_best", 0.0))
-                out[cat] = thr if f1 > 0 else 0.5
+            # verbatim from calibration.json so config.json and the report always match
+            out = dict(cal.get("cat_thresholds") or {})
+            if not out:
+                for cat, v in cal.get("categories", {}).items():
+                    out[cat] = float(v.get("best_threshold", 0.5))
         except Exception:
             pass
     return out
+
+
+def cat_experimental() -> list:
+    """Categories whose catval F1 < 0.3 — marked experimental in config."""
+    import json as _json
+
+    p = Path(__file__).resolve().parent.parent / "reports" / "calibration.json"
+    if p.exists():
+        try:
+            cal = _json.loads(p.read_text())
+            return list(cal.get("cat_experimental") or [])
+        except Exception:
+            pass
+    return []
 
 
 def calibration_temperature() -> float:
@@ -57,24 +72,26 @@ def calibration_temperature() -> float:
 
 
 def lang_thresholds() -> dict:
-    """Per-language binary thresholds from reports/multilingual.json (textdetox best_thr)."""
+    """Per-language binary thresholds from reports/lang_thresholds.json.
+
+    Censer.9: tuned on the tune half of textdetox targeting FPR<=5% on benign
+    rows with a floor of 0.3 (never below 0.3), only for languages with
+    test-half F1 >= 0.5. 'default' (0.5) is used whenever detect_lang is unsure
+    or the language is unsupported (cs/pt/... included -> documented default).
+    """
     import json as _json
 
-    p = Path(__file__).resolve().parent.parent / "reports" / "multilingual.json"
-    out = {}
+    p = Path(__file__).resolve().parent.parent / "reports" / "lang_thresholds.json"
     if p.exists():
         try:
-            res = _json.loads(p.read_text()).get("results", {})
-            for k, v in res.items():
-                # only trust a tuned threshold when the language actually performs
-                # (best_f1 >= 0.5); otherwise keep the safe default 0.5 so that
-                # unsupported languages are not flagged wholesale
-                if (k.startswith("textdetox_") and v.get("best_thr") is not None
-                        and v.get("n", 0) >= 400 and float(v.get("best_f1", 0)) >= 0.5):
-                    out[k.split("_", 1)[1]] = round(float(v["best_thr"]), 3)
+            data = _json.loads(p.read_text())
+            out = {"default": float(data.get("default", 0.5))}
+            for lang, thr in data.get("langs", {}).items():
+                out[lang] = max(0.3, float(thr))
+            return out
         except Exception:
             pass
-    return out or {"en": 0.5}
+    return {"default": 0.5}
 
 
 def to_llama_state_dict(state: dict, answer_ids: list[int]) -> dict:
@@ -155,6 +172,8 @@ def llama_config(state: dict, tok_meta: dict, tok_ids: dict) -> dict:
         # calibrated per-category cutoffs (tuned on held-out catval; falls back to 0.5)
         **({"cat_thresholds": cat_thresholds()} if n_answers > 2 else {}),
         "temperature": calibration_temperature(),
+        "must_catch_override": {"self_harm": 0.3, "sexual_abuse": 0.3},
+        "cat_experimental": cat_experimental(),
         "lang_thresholds": lang_thresholds(),
     }
 

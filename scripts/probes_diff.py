@@ -16,7 +16,7 @@ from kuclab.probes import PROBES
 CKPTS = [
     ("Censer.5", "/home/tvadmin/censer.5/checkpoints/best.pt", "/home/tvadmin/censer.5/checkpoints/tokenizer"),
     ("Censer.6", "/home/tvadmin/censer.6/checkpoints/best.pt", "/home/tvadmin/censer.6/checkpoints/tokenizer"),
-    ("Censer.9", "checkpoints8/best.pt", "checkpoints8/tokenizer"),
+    ("Censer.9", "checkpoints9/best.pt", "checkpoints9/tokenizer"),
     ("Censer.7", "/home/tvadmin/censer.7/checkpoints/best.pt", "/home/tvadmin/censer.7/checkpoints/tokenizer"),
 ]
 
@@ -42,9 +42,9 @@ def main() -> None:
     if "Censer.9" in misses and "Censer.5" in misses:
         fixed = [m for m in misses["Censer.5"] if m not in misses["Censer.9"]]
         regressed = [m for m in misses["Censer.9"] if m not in misses["Censer.5"]]
-        out["diff_5_vs_8"] = {"fixed_by_7": fixed, "regressed_in_7": regressed}
-        print("fixed by .8 vs .5:", fixed)
-        print("regressed in .8 vs .5:", regressed)
+        out["diff_5_vs_9"] = {"fixed_by_9": fixed, "regressed_in_9": regressed}
+        print("fixed by .9 vs .5:", fixed)
+        print("regressed in .9 vs .5:", regressed)
     Path("reports/probes_diff.json").write_text(json.dumps({"results": out, "misses": misses}, indent=2, ensure_ascii=False))
     print("wrote reports/probes_diff.json")
 

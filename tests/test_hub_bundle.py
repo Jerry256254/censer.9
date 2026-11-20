@@ -92,7 +92,7 @@ def test_standalone_labels_are_bare(bundle):
     out, _ = bundle
     standalone = load_standalone()
     pipe = standalone.CenserPipeline(out)
-    assert pipe.predict("hello")["label"] in {"0", "1"}
+    assert pipe.predict("hello")["label"] in {"safe", "unsafe"}
 
 
 def test_standalone_batch_shape(bundle):

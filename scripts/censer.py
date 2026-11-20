@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tokenizers import Tokenizer
+import unicodedata
 
 PAD, BOS, USER, ASSISTANT = "[PAD]", "[BOS]", "[USER]", "[ASSISTANT]"
 
@@ -173,44 +175,119 @@ class Censer(nn.Module):
 
 
 
-_STOPWORDS = {
-    "en": {"the","and","you","is","to","a","in","that","i","of","for","it","my","me","do","what","how","are"},
-    "cs": {"je","se","na","že","to","s","v","jsem","můj","moje","jak","co","nebo","pro","si","ty","ten"},
-    "de": {"der","die","das","und","ist","ich","du","nicht","mit","ein","eine","auf","für","wie","was","mein","sich"},
-    "es": {"el","la","de","que","y","en","un","una","es","por","con","para","mi","yo","como","qué","los","las"},
-    "fr": {"le","la","de","et","les","des","en","un","une","est","pour","que","qui","je","tu","mon","ma","comment"},
-    "it": {"il","lo","la","di","e","che","un","una","è","per","con","non","mi","io","come","sono","gli","le"},
-    "pt": {"o","a","de","e","que","um","uma","em","para","com","não","eu","meu","minha","como","os","as"},
+STOPWORDS = {
+    "en": {"the", "and", "you", "is", "to", "a", "in", "that", "i", "of", "for", "it", "my", "me", "do", "what", "how", "are", "please", "hello", "want", "kill", "make", "bomb", "story", "write", "ignore", "rules", "send", "me", "dan", "anything", "now"},
+    "cs": {"je", "se", "na", "že", "to", "jsem", "můj", "moje", "jak", "co", "nebo", "pro", "si", "ty", "ten", "prosím", "díky", "ahoj", "není", "bude", "chci", "chceš", "mám", "nemám", "nevím", "dobrý", "ráno", "večer", "zítra", "ano", "ne", "jsme", "byl", "byla", "mluvit", "pomoct", "napiš", "pošli", "hacknout", "zabít"},
+    "de": {"der", "die", "das", "und", "ist", "ich", "du", "nicht", "mit", "ein", "eine", "auf", "für", "wie", "was", "mein", "sich", "hallo", "danke", "bitte", "will", "mich", "umbringen", "filtere", "wasser", "zuhause"},
+    "es": {"el", "la", "de", "que", "y", "en", "un", "una", "es", "por", "con", "para", "mi", "yo", "como", "qué", "los", "las", "hola", "gracias", "cómo", "está", "quiero", "tengo", "estoy", "murió", "abuela", "encanta", "fabricar", "bomba", "casera", "suicidarme", "odiar", "odio"},
+    "fr": {"le", "la", "de", "et", "les", "des", "en", "un", "une", "est", "pour", "que", "qui", "je", "tu", "mon", "ma", "comment", "bonjour", "merci", "veux", "voudrais", "vais", "tuer", "fabriquer"},
+    "it": {"il", "lo", "la", "di", "e", "che", "un", "una", "è", "per", "con", "non", "io", "come", "sono", "gli", "le", "ciao", "grazie", "voglio", "uccidermi", "odio", "traffico", "come", "stai"},
+    "pt": {"o", "a", "de", "e", "que", "um", "uma", "em", "para", "com", "não", "eu", "meu", "minha", "como", "os", "as", "olá", "obrigado", "quero", "estou"},
+    "ru": {"и", "в", "не", "на", "я", "что", "с", "а", "это", "как", "но", "ты", "мне", "привет", "здравствуй"},
+    "uk": {"і", "в", "не", "на", "я", "що", "з", "а", "це", "як", "ти", "мені", "привіт", "дякую", "який", "щоб", "ак", "справи", "ні", "так", "удь", "ласка"},
 }
 
-def detect_lang(text: str) -> str:
-    """Heuristic language guess (scripts first, then Latin stopwords)."""
-    import unicodedata, re as _re
+# distinctive diacritics per language (strong evidence, worth 2 points each)
+DIACRITICS = {
+    "cs": set("ěščřžůďťň"),
+    "es": set("ñ¿¡"),
+    "pt": set("ãõ"),
+    "de": set("ß"),
+    "fr": set("çœàâæêëîïôùû"),
+    "it": set(["à", "è", "ò", "ù"]),
+    "uk": set("ґєії"),
+    "ru": set("ёъыэ"),
+}
+
+MIN_SCORE = 2  # below this we do not trust the guess -> global threshold
+# --- Censer.9 must-catch pre-filter: highest-severity classes are caught by
+# deterministic patterns (independent of language threshold and category head).
+# Text is accent-folded to ASCII before matching. Detection phrases only. ---
+MUST_CATCH_PATTERNS: list[tuple[str, str]] = [
+    (r"\b(csam|cp links?|child porn\w*|kinderpornografie|porn\w* infantile|pornografia infantil|detsk\w* porn\w*|nah\w* fotk\w* deti|nah\w* fotky nezletil\w*|fotos de menores|underage nudes|cp download)\b", "sexual_abuse"),
+    (r"\b(zabit\w*|sebevrazda|sebevrazedn\w*|sebeposkozeni|chci umrit|jak se (zabit|obesit)|kill myself|end it all|i want to die|how to die|suicid\w*|umbringen|sterben|morir|morirme|voglio (uccidermi|morire|sparire)|me suicider|je veux mourir)\b", "self_harm"),
+]
+_MUST_CATCH_RE = [(re.compile(p, re.IGNORECASE), c) for p, c in MUST_CATCH_PATTERNS]
+
+
+def _fold_ascii(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def must_catch_hit(text: str) -> list[str]:
+    """Categories of any must-catch pattern hit (CSAM / self-harm)."""
+    folded = _fold_ascii(text).lower()
+    return sorted({c for rx, c in _MUST_CATCH_RE if rx.search(folded)})
+
+
+def _script(text: str) -> str:
+    counts = {}
     for ch in text:
         if ch.isalpha():
             name = unicodedata.name(ch, "")
-            if "CYRILLIC" in name:
-                return "uk" if any(c in text for c in "їєії") else "ru"
-            if "HAN" in name:
-                return "zh"
-            if "HIRAGANA" in name or "KATAKANA" in name:
-                return "ja"
-            if "HANGUL" in name:
-                return "ko"
-            if "ARABIC" in name:
-                return "ar"
-            if "DEVANAGARI" in name:
-                return "hi"
-            if "HEBREW" in name:
-                return "he"
-            break
-    words = _re.findall(r"[a-zà-ÿ']+", text.lower())
-    best, bn = "en", 0
-    for lang, stops in _STOPWORDS.items():
+            for key in ("CYRILLIC", "HAN", "HIRAGANA", "KATAKANA", "HANGUL", "ARABIC", "DEVANAGARI", "HEBREW", "LATIN"):
+                if key in name:
+                    counts[key] = counts.get(key, 0) + 1
+                    break
+    if not counts:
+        return "latin"
+    top = max(counts, key=counts.get)
+    if top == "LATIN":
+        return "latin"
+    return {"CYRILLIC": "cyrillic", "HAN": "han", "HIRAGANA": "kana", "KATAKANA": "kana",
+            "HANGUL": "hangul", "ARABIC": "arabic", "DEVANAGARI": "devanagari", "HEBREW": "hebrew"}[top]
+
+
+def _script(text: str) -> str:
+    counts = {}
+    for ch in text:
+        if ch.isalpha():
+            name = unicodedata.name(ch, "")
+            for key in ("CYRILLIC", "HAN", "HIRAGANA", "KATAKANA", "HANGUL", "ARABIC", "DEVANAGARI", "HEBREW", "LATIN"):
+                if key in name:
+                    counts[key] = counts.get(key, 0) + 1
+                    break
+    if not counts:
+        return "latin"
+    top = max(counts, key=counts.get)
+    if top == "LATIN":
+        return "latin"
+    return {"CYRILLIC": "cyrillic", "HAN": "han", "HIRAGANA": "kana", "KATAKANA": "kana",
+            "HANGUL": "hangul", "ARABIC": "arabic", "DEVANAGARI": "devanagari", "HEBREW": "hebrew"}[top]
+
+
+def detect_lang(text: str) -> str:
+    """Heuristic ISO-639-1 guess; returns 'default' (global threshold) when unsure."""
+    s = _script(text)
+    if s == "cyrillic":
+        uk_score = sum(1 for w in re.findall(r"[a-zа-яіїєґ']+", text.lower()) if w in STOPWORDS["uk"])
+        uk_score += 2 * sum(text.count(c) for c in "ґєії")
+        ru_score = sum(1 for w in re.findall(r"[a-zа-яёъыэ']+", text.lower()) if w in STOPWORDS["ru"])
+        return "uk" if uk_score >= MIN_SCORE and uk_score > ru_score else ("ru" if ru_score >= MIN_SCORE else "default")
+    if s == "han":
+        return "zh"
+    if s == "kana":
+        return "ja"
+    if s == "hangul":
+        return "ko"
+    if s == "arabic":
+        return "ar"
+    if s == "devanagari":
+        return "hi"
+    if s == "hebrew":
+        return "he"
+    words = re.findall(r"[a-zà-ÿěščřžďťňáéíúůóßäöüñãõ]+", text.lower())
+    if not words:
+        return "default"
+    scores = {}
+    for lang, stops in STOPWORDS.items():
+        if lang in ("ru", "uk"):
+            continue
         n = sum(1 for w in words if w in stops)
-        if n > bn:
-            best, bn = lang, n
-    return best if bn > 0 else "en"
+        n += 2 * sum(text.lower().count(c) for c in DIACRITICS.get(lang, ""))
+        scores[lang] = n
+    best = max(scores, key=scores.get)
+    return best if scores[best] >= MIN_SCORE else "default"
 
 
 
@@ -283,6 +360,7 @@ def internal_cfg(cfg: dict) -> dict:
     }
 
 
+
 class CenserPipeline:
     """Text in, "1" (unsafe) or "0" (safe) out."""
 
@@ -297,6 +375,7 @@ class CenserPipeline:
         self.threshold = threshold
         self.cat_thresholds = dict(self.cfg.get("cat_thresholds") or {})
         self.temperature = float(self.cfg.get("temperature", 1.0) or 1.0)
+        self.cat_experimental = set(self.cfg.get("cat_experimental") or [])
         self.lang_thresholds = dict(self.cfg.get("lang_thresholds") or {})
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model = Censer(self.cfg)
@@ -333,7 +412,7 @@ class CenserPipeline:
             ids = self._encode_full(text)
             body = ids[2:-1]
             if len(body) <= chunk_tokens:
-                out.append(self._classify_ids([ids[: self.cfg["max_seq_len"]]], [thr])[0])
+                out.append(self._classify_ids([ids[: self.cfg["max_seq_len"]]], [thr], [text])[0])
                 continue
             chunks = []
             start = 0
@@ -345,7 +424,7 @@ class CenserPipeline:
             rows = []
             for piece in chunks:
                 cids = [self.bos_id, self.user_id, *piece, self.assistant_id]
-                rows.append(self._classify_ids([cids[: self.cfg["max_seq_len"]]], [thr])[0])
+                rows.append(self._classify_ids([cids[: self.cfg["max_seq_len"]]], [thr], [text])[0])
             best = max(rows, key=lambda r: r["score"])
             # aggregate categories by max prob
             n_cat = len(rows[0].get("category_scores", []))
@@ -365,7 +444,7 @@ class CenserPipeline:
     def categories(self) -> list[str]:
         return self.cfg.get("categories") or []
 
-    def _classify_ids(self, seqs: list[list[int]], thresholds: list[float] | None = None) -> list[dict]:
+    def _classify_ids(self, seqs: list[list[int]], thresholds: list[float] | None = None, texts: list[str] | None = None) -> list[dict]:
         width = max(len(s) for s in seqs)
         ids = torch.full((len(seqs), width), self.pad_id, dtype=torch.long)
         for i, seq in enumerate(seqs):
@@ -379,17 +458,26 @@ class CenserPipeline:
             cats = self.categories()
             cat_scores = row[2:] if cats else []
             is_unsafe = p >= thresholds[i]
+            # Censer.9: must-catch pre-filter — CSAM / self-harm pattern hits force
+            # unsafe regardless of the (language) binary threshold
+            hit_override = must_catch_hit(texts[i]) if texts else []
+            if hit_override:
+                is_unsafe = True
             res.append({
-                "label": "1" if is_unsafe else "0",
+                "label": "unsafe" if is_unsafe else "safe",
+                "label_id": "1" if is_unsafe else "0",
                 "unsafe": is_unsafe,
                 "score": round(p, 4),
                 "category_scores": [round(c, 4) for c in cat_scores],
                 # categories are only reported when the binary verdict is unsafe
-                "categories": ([c for c, sc in zip(cats, cat_scores)
-                                if sc >= float(self.cat_thresholds.get(c, self.threshold))]
+                "categories": (sorted(set([c for c, sc in zip(cats, cat_scores)
+                                if sc >= float(self.cat_thresholds.get(c, self.threshold))
+                                and c not in self.cat_experimental]) | set(hit_override))
                                if is_unsafe else []),
             })
         return res
+
+
 
 
 def _color(text: str, code: str) -> str:
@@ -438,7 +526,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.repl or not text:
         raise SystemExit(repl(pipe))
     verdict = pipe.predict(text)
-    print(json.dumps(verdict) if args.json else verdict["label"])
+    print(json.dumps(verdict) if args.json else verdict["label"])  # "safe" / "unsafe"
 
 
 if __name__ == "__main__":

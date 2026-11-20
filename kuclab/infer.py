@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 
 from .evaluate import load_checkpoint, predict_full, predict_proba_chunked
+from .langdetect import must_catch_hit
 
 
 @dataclass
@@ -41,6 +42,7 @@ class SafetyModel:
         self.max_len = self.model_config.max_seq_len
         self.threshold = threshold
         self.temperature = float(self.state.get("temperature", 1.0) or 1.0)
+        self.must_catch_override = dict(self.state.get("must_catch_override") or {})
 
     def _cats(self) -> list[str]:
         from .categories import CATEGORIES
@@ -51,14 +53,20 @@ class SafetyModel:
         probs = predict_proba_chunked(self.model, self.tokenizer, [text[: self.max_chars * 8]], self.max_len, self.device, temperature=self.temperature)[0]
         cats = self._cats()
         row = predict_full(self.model, self.tokenizer, [text[: self.max_chars]], self.max_len, self.device, temperature=self.temperature)[0]
-        flagged = [c for c, p in zip(cats, row[2:]) if p >= self.threshold] if (cats and probs >= self.threshold) else None
-        return Verdict(label="1" if probs >= self.threshold else "0", probability=probs,
+        is_unsafe = probs >= self.threshold
+        hit = must_catch_hit(text)  # Censer.9 pattern pre-filter (CSAM / self-harm)
+        if hit:
+            is_unsafe = True
+        flagged = None
+        if cats and is_unsafe:
+            flagged = sorted(set([c for c, p in zip(cats, row[2:]) if p >= self.threshold]) | set(hit))
+        return Verdict(label="unsafe" if is_unsafe else "safe", probability=probs,
                        threshold=self.threshold, categories=flagged)
 
     def predict_batch(self, texts: list[str]) -> list[Verdict]:
         trimmed = [t[: self.max_chars * 8] for t in texts]
         probs = predict_proba_chunked(self.model, self.tokenizer, trimmed, self.max_len, self.device, temperature=self.temperature)
         return [
-            Verdict(label="1" if p >= self.threshold else "0", probability=p, threshold=self.threshold)
+            Verdict(label="unsafe" if p >= self.threshold else "safe", probability=p, threshold=self.threshold)
             for p in probs
         ]
