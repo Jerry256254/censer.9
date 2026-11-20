@@ -1,5 +1,8 @@
 # Censer.9
 
+> **Successor: [Barist.1](https://huggingface.co/KucLab/Barist.1)** (GitHub: [Jerry256254/barist.1](https://github.com/Jerry256254/barist.1)) — the project continues under the Barist name; Barist.1 fixes the third adversarial review of Censer.9 (Czech benign FP, pre-filter over-blocking, uk FP, de/fr thresholds, category noise, README honesty). This repo is kept for reproducibility.
+
+
 A tiny decoder-only LLM (**903,552 parameters, 3.6 MB fp32**) trained **from scratch**
 on an AMD GPU. Binary **safe/unsafe** + **10 safety categories** (multi-label, calibrated
 per-category thresholds), **4096-token** context (chunked-max for long documents),
