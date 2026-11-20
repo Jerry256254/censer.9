@@ -1,0 +1,60 @@
+{
+  "name": "Censer.7",
+  "seed": 1337,
+  "max_chars": 4000,
+  "max_seq_len": 4096,
+  "tokenizer": {
+    "vocab_size": 2048,
+    "min_frequency": 2,
+    "corpus_samples": 200000
+  },
+  "model": {
+    "n_layers": 3,
+    "n_heads": 4,
+    "d_model": 128,
+    "d_ff": 384,
+    "dropout": 0.1,
+    "tie_embeddings": true,
+    "rope_scaling": {
+      "rope_type": "linear",
+      "type": "linear",
+      "factor": 8.0
+    }
+  },
+  "data": {
+    "val_fraction": 0.08,
+    "test_fraction": 0.08,
+    "max_per_source": 120000,
+    "civil_comments_threshold": 0.5,
+    "safe_ratio": 1.4,
+    "curated_repeat": 5,
+    "synthetic_safe": 16000,
+    "hard_negative_ratio": 0.15,
+    "borderline_ratio": 0.05
+  },
+  "train": {
+    "batch_size": 256,
+    "grad_accum_steps": 1,
+    "epochs": 5,
+    "lr": 0.001,
+    "min_lr": 0.0001,
+    "warmup_steps": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "eval_every_steps": 300,
+    "num_workers": 4,
+    "amp": true,
+    "curated_weight": 4.0,
+    "safe_curated_weight": 6.0,
+    "augment_typo": 0.15,
+    "distill": {
+      "alpha": 0.65,
+      "temperature": 4.0,
+      "soft_file": "data/processed/train_soft7.npy",
+      "curated_boost": 0.75
+    },
+    "augment_adversarial": 0.05,
+    "cat_weight": 0.0
+  },
+  "train_seq_len": 512
+}

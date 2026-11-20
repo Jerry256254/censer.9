@@ -1,0 +1,47 @@
+{
+  "name": "Censer .1",
+  "seed": 1337,
+  "max_chars": 500,
+  "max_seq_len": 160,
+
+  "tokenizer": {
+    "vocab_size": 2048,
+    "min_frequency": 2,
+    "corpus_samples": 200000
+  },
+
+  "model": {
+    "n_layers": 4,
+    "n_heads": 4,
+    "d_model": 128,
+    "d_ff": 384,
+    "dropout": 0.1,
+    "tie_embeddings": true
+  },
+
+  "data": {
+    "val_fraction": 0.08,
+    "test_fraction": 0.08,
+    "max_per_source": 120000,
+    "civil_comments_threshold": 0.5,
+    "safe_ratio": 1.4,
+    "curated_repeat": 3,
+    "synthetic_safe": 9000,
+    "hard_negative_ratio": 0.15,
+    "borderline_ratio": 0.05
+  },
+
+  "train": {
+    "batch_size": 128,
+    "grad_accum_steps": 1,
+    "epochs": 6,
+    "lr": 0.003,
+    "min_lr": 0.0001,
+    "warmup_steps": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "eval_every_steps": 400,
+    "num_workers": 4,
+    "amp": true
+  }
+}

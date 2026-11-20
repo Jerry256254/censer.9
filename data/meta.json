@@ -1,0 +1,93 @@
+{
+  "max_chars": 500,
+  "config": {
+    "name": "Censer.2",
+    "seed": 1337,
+    "max_chars": 500,
+    "max_seq_len": 256,
+    "tokenizer": {
+      "vocab_size": 4096,
+      "min_frequency": 2,
+      "corpus_samples": 200000
+    },
+    "model": {
+      "n_layers": 6,
+      "n_heads": 8,
+      "d_model": 256,
+      "d_ff": 1024,
+      "dropout": 0.1,
+      "tie_embeddings": true
+    },
+    "data": {
+      "val_fraction": 0.08,
+      "test_fraction": 0.08,
+      "max_per_source": 120000,
+      "civil_comments_threshold": 0.5,
+      "safe_ratio": 1.4,
+      "curated_repeat": 5,
+      "synthetic_safe": 16000,
+      "hard_negative_ratio": 0.15,
+      "borderline_ratio": 0.05
+    },
+    "train": {
+      "batch_size": 128,
+      "grad_accum_steps": 1,
+      "epochs": 10,
+      "lr": 0.002,
+      "min_lr": 0.0001,
+      "warmup_steps": 300,
+      "weight_decay": 0.1,
+      "grad_clip": 1.0,
+      "eval_every_steps": 400,
+      "num_workers": 4,
+      "amp": true,
+      "curated_weight": 8.0,
+      "safe_curated_weight": 12.0
+    }
+  },
+  "counts": {
+    "train": {
+      "total": 104474,
+      "safe": 75653,
+      "unsafe": 28821,
+      "sources": {
+        "civil_comments": 38513,
+        "jigsaw": 36891,
+        "hard_negative": 570,
+        "toxic_chat": 859,
+        "aegis": 5846,
+        "beavertails": 4242,
+        "dolly": 3028,
+        "synthetic_safe": 14040,
+        "curated_unsafe": 385,
+        "borderline": 100
+      }
+    },
+    "val": {
+      "total": 6585,
+      "safe": 3841,
+      "unsafe": 2744,
+      "sources": {
+        "jigsaw": 2647,
+        "civil_comments": 2802,
+        "toxic_chat": 40,
+        "aegis": 549,
+        "beavertails": 380,
+        "dolly": 167
+      }
+    },
+    "test": {
+      "total": 6496,
+      "safe": 3789,
+      "unsafe": 2707,
+      "sources": {
+        "jigsaw": 2631,
+        "civil_comments": 2747,
+        "aegis": 543,
+        "dolly": 149,
+        "toxic_chat": 56,
+        "beavertails": 370
+      }
+    }
+  }
+}
